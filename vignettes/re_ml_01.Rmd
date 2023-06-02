@@ -1,0 +1,246 @@
+---
+title: "Report Exercise 9"
+author: "Janina Hämmerli"
+date: "2023-05-08"
+output: html_document
+  toc: TRUE
+---
+
+# Loading the necessary code from chapter 9
+
+## Reading data and selecting variables
+
+```{r warning=FALSE}
+daily_fluxes <- readr::read_csv("~/Studium Jahr 2/ADGS/my_project/agds_report_janinahaemmerli/Data/FLX_CH-Dav_FLUXNET2015_FULLSET_DD_1997-2014_1-3.csv")
+
+daily_fluxes <- daily_fluxes |>  
+  
+  # select only the variables we are interested in
+  dplyr::select(TIMESTAMP,
+                GPP_NT_VUT_REF,    # the target
+                ends_with("_QC"),  # quality control info
+                ends_with("_F"),   # includes all all meteorological covariates
+                -contains("JSB")   # weird useless variable
+                ) |>
+
+  # convert to a nice date object
+  dplyr::mutate(TIMESTAMP = lubridate::ymd(TIMESTAMP)) |>
+
+  # set all -9999 to NA
+  dplyr::mutate(across(where(is.numeric), ~dplyr::na_if(., -9999))) |> 
+  
+  # retain only data based on >=80% good-quality measurements
+  # overwrite bad data with NA (not dropping rows)
+  dplyr::mutate(GPP_NT_VUT_REF = ifelse(NEE_VUT_REF_QC < 0.8, NA, GPP_NT_VUT_REF),
+                TA_F           = ifelse(TA_F_QC        < 0.8, NA, TA_F),
+                SW_IN_F        = ifelse(SW_IN_F_QC     < 0.8, NA, SW_IN_F),
+                LW_IN_F        = ifelse(LW_IN_F_QC     < 0.8, NA, LW_IN_F),
+                VPD_F          = ifelse(VPD_F_QC       < 0.8, NA, VPD_F),
+                PA_F           = ifelse(PA_F_QC        < 0.8, NA, PA_F),
+                P_F            = ifelse(P_F_QC         < 0.8, NA, P_F),
+                WS_F           = ifelse(WS_F_QC        < 0.8, NA, WS_F)) |> 
+
+  # drop QC variables (no longer needed)
+  dplyr::select(-ends_with("_QC"))
+```
+
+## Data spliting and model fitting
+
+```{r warning = FALSE}
+library(tidyverse)
+library(recipes)
+
+# Data splitting
+set.seed(1982)  # for reproducibility
+split <- rsample::initial_split(daily_fluxes, prop = 0.7, strata = "VPD_F")
+daily_fluxes_train <- rsample::training(split)
+daily_fluxes_test <- rsample::testing(split)
+
+# Model and pre-processing formulation, use all variables but LW_IN_F
+pp <- recipes::recipe(GPP_NT_VUT_REF ~ SW_IN_F + VPD_F + TA_F, 
+                      data = daily_fluxes_train |> drop_na()) |> 
+  recipes::step_BoxCox(all_predictors()) |> 
+  recipes::step_center(all_numeric(), -all_outcomes()) |>
+  recipes::step_scale(all_numeric(), -all_outcomes())
+
+# Fit linear regression model
+mod_lm <- caret::train(
+  pp, 
+  data = daily_fluxes_train |> drop_na(), 
+  method = "lm",
+  trControl = caret::trainControl(method = "none"),
+  metric = "RMSE"
+)
+
+# Fit KNN model
+mod_knn <- caret::train(
+  pp, 
+  data = daily_fluxes_train |> drop_na(), 
+  method = "knn",
+  trControl = caret::trainControl(method = "none"),
+  tuneGrid = data.frame(k = 8),
+  metric = "RMSE"
+)
+```
+
+## Model evaluation
+
+```{r warning=FALSE}
+# linear regression model
+source("~/Studium Jahr 2/ADGS/my_project/agds_report_janinahaemmerli/R/eval_model.R")
+
+eval_model(mod = mod_lm, df_train = daily_fluxes_train, df_test = daily_fluxes_test)
+```
+
+```{r warning=FALSE}
+# KNN
+
+eval_model(mod = mod_knn, df_train = daily_fluxes_train, df_test = daily_fluxes_test)
+```
+
+# 2. Comparison of the linear regression and KNN models
+
+## Why is the difference between the evaluation on the training and the test set larger for the KNN model than for the linear regression model?
+
+The difference between the evaluation on the training set and the test set is greater for KNN than for linear regression because KNN is a nonparametric model that has higher variance, so it gets influenced more by irrelevant training data and changes more when applied on the test set. In contrast, linear regression is a parametric model with lower variance, it changes less when used on the test set but as it has a lower R square value, it matches the training data less than the KNN model.
+
+## Why is the does the evaluation on the test set indicate a better model performance of the KNN model than the linear regression model?
+
+The evaluation on the test set shows a better performance of the KNN model than the linear regression model, because KNN is able to model non-linear relationships between variables, while linear regression can only model linear relationships. So if there is a non-linear relationship, the fit of the linear-regression model is poorer, while the KNN model as a nonparametric model is more flexible in terms of the form of the relationship.
+
+## How would you position the KNN and the linear regression model along the spectrum of the bias-variance trade-off?
+
+In terms of the bias-variance trade-off, I would position the KNN model as a low bias, high variance model, while linear regression would be positioned as a low variance, higher bias model. So the KNN model fits the training data well but changes more when it is applied on the test data set. The linear-regression model doesn't fit the training data as well (depending on the data) but it doesn't change as much as the KNN model.
+
+# 3. Visualisation of temporal variations of GPP
+
+## Preparing the data used for the plots
+
+Here I predicted the fitted values I needed to visualize temporal variations for different models.   
+```{r warning=FALSE}
+#Predictions of the lm-model
+df_train_lm <- daily_fluxes_train |> 
+    drop_na()
+df_train_lm$fitted <- predict(mod_lm, newdata = df_train_lm)
+  
+df_test_lm <- daily_fluxes_test |> 
+    drop_na()
+  df_test_lm$fitted <- predict(mod_lm, newdata = df_test_lm)
+  
+#Predictions of the KNN-model
+df_train_knn <- daily_fluxes_train |> 
+    drop_na()
+df_train_knn$fitted <- predict(mod_knn, newdata = df_train_knn)
+  
+df_test_knn <- daily_fluxes_test |> 
+    drop_na()
+  df_test_knn$fitted <- predict(mod_knn, newdata = df_test_knn)
+```
+
+## Plot with all the different models and the original GPP values compared
+
+In the plot we can see that the original GPP (red) has more extreme values than the predicted values of the models.This makes sense because the predicted values are based on other values around that aren't as extreme as the actual outlier value, so the prediction won't be an outlier. 
+But otherwise, all the models follow almost the same pattern.
+```{r warning=FALSE}
+library(ggplot2)
+
+ggplot(data = df_train_lm, aes(x = TIMESTAMP, y = fitted)) +
+  geom_point(aes(color = "lm on train set")) +
+  geom_point(data = df_test_lm, aes(x = TIMESTAMP, y = fitted, color = "lm on test set")) +
+  geom_point(data = df_train_knn, aes(x = TIMESTAMP, y = fitted, color = "knn on train set")) +
+  geom_point(data = df_test_knn, aes(x = TIMESTAMP, y = fitted, color = "knn on test set")) +
+  geom_point(data = df_train_lm, aes(x = TIMESTAMP, y = GPP_NT_VUT_REF, color = "GPP original")) +
+  scale_color_manual("Data type", values = c("lm on train set"="blue", "lm on test set"="green", "knn on train set"="violet", "knn on test set"="yellow", "GPP original"="red" )) +
+  theme_classic()
+
+```
+
+# The role of k
+
+## 1. My hypothesis:
+
+When k approaches 1, it means that a only local variation in the data gets captured, so only a few neighbors of the predicted value. This makes the model more flexible and the model will have a low bias and a high variance. So the model will fit the training data well but will not be able to generalize well to the new data in the test set. So the R-squared value will increase on the training set with k close to 1 and for the test set it will decrease, while the MAE on the test set increases, meaning that the model fits the new data worse.
+
+When k approaches N, the model will capture a bigger part of the data, so it becomes less flexible. So the model will have a higher bias and a lower variance, meaning that it doesn't fit the training data that good but performs better on new data of the test set. So the R-squared value will decrease on the training data but increase on the test data while the MAE decreases on the test data, meaning that the model fits the new data better.
+
+```{r warning=FALSE}
+install.packages(("Metrics"))
+```
+
+```{r warning= FALSE}
+# Load caret package
+
+library(caret)
+library(dplyr)
+
+library(Metrics)
+
+# Split the data into a training set (70%) and a test set (30%)
+set.seed(123)
+split <- rsample::initial_split(daily_fluxes, prop = 0.7, strata = "VPD_F")
+daily_fluxes_train2 <- rsample::training(split)
+daily_fluxes_test2 <- rsample::testing(split)
+
+# Define a range of k values to test
+kValues <- seq(1, 40)
+
+# List to save the models with different k values in
+knnFit <- list()
+
+#List to save the mae values
+mae_values <- list()
+
+daily_fluxes_train2 <- daily_fluxes_train2 |> 
+    tidyr::drop_na()
+
+# Function to calculate the MAE for different k values, can be applied on different data sets (e.g. train or test data) and k value can be specified as input
+
+func <- function(df, kVal){
+  df <- df |>
+    tidyr::drop_na()
+  
+  fVals <- data.frame(GPP = df$GPP_NT_VUT_REF)
+  
+  for (i in seq_along((kVal))) {
+    knnFit[[i]] <- train(pp,
+                       data = daily_fluxes_train2 |> tidyr::drop_na(),
+                       method = "knn",
+                       trControl = trainControl(method = "none"),
+                       tuneGrid = data.frame(k = kVal[i]),
+                       metric = "MAE")
+  
+  fVals[,ncol(fVals) + 1] <- predict(knnFit[[i]], newdata = df)
+}
+for (i in fVals[1:length(kVal)]){
+  mae_values[[length(mae_values) + 1]] <- Metrics::mae(fVals$GPP, i)
+}
+return(mae_values)
+}
+# Applying the function on the training set
+mae_train <- func(daily_fluxes_train2, kValues)
+mae_train <- as.data.frame(do.call(rbind, mae_train))
+
+#Applying the function on the test set
+mae_test <- func(daily_fluxes_test2, kValues)
+mae_test <- as.data.frame(do.call(rbind, mae_test))
+
+# Ploting the MAE values against the number of k
+train_mae <- data.frame(kValues, mae_train)
+test_mae <- data.frame(kValues, mae_test)
+
+ggplot(data = train_mae, aes(x = kValues, y = V1)) +
+  geom_point(color = "red") +
+  geom_point(data = test_mae, aes(x = kValues, y = V1), color = "blue") +
+  theme_classic()
+  
+```
+In my visualization, we can see that the MAE of the test set for low k values are pretty high. This means that single neighbors had a big influence on the predicted values, what resulted in poor performance on the test data. So approximalty up to k = 10 the model is underfitted on the test set. 
+
+## Is there an "optimal" k in terms of model generalisability?
+
+There is always an optimal k for KNN models. To determine the optimal k, we have to look at at the performance of the model on the test set, because like this model generalisability can be determined and not with the performance on the training set. So we have to look for which k the MAE is the lowest. Above in the plot and by calculating below we can see that the MAE is the lowest for k = 25, so this is the optimal k in this case. 
+
+```{r warning=FALSE}
+which.min(mae_test[2:40,])
+```
+

@@ -1,0 +1,367 @@
+---
+title: "Report Exercise 10"
+author: "Janina Hämmerli"
+date: "2023-05-08"
+output: html_document
+  toc: TRUE
+---
+
+# 1. Preparing the data
+
+## Loading the data
+
+```{r warning = FALSE}
+
+library(readr)
+
+data_dav <- read_csv("~/Studium Jahr 2/ADGS/my_project/agds_report_janinahaemmerli/Data/FLX_CH-Dav_FLUXNET2015_FULLSET_DD_1997-2014_1-3.csv")
+
+data_lae <- read_csv("~/Studium Jahr 2/ADGS/my_project/agds_report_janinahaemmerli/Data/FLX_CH-Lae_FLUXNET2015_FULLSET_DD_2004-2014_1-4.csv")
+```
+
+## Preparing the Davos dataset
+
+I prepared the data by selecting the variables I wanted to use and filter out the bad data.
+
+```{r warning = FALSE}
+
+dav_1 <- data_dav |>  
+  
+  # select only the variables we are interested in
+  dplyr::select(TIMESTAMP,
+                GPP_NT_VUT_REF,    # the target
+                ends_with("_QC"),  # quality control info
+                ends_with("_F"),   # includes all all meteorological covariates
+                -contains("JSB")   # weird useless variable
+                ) |>
+
+  # convert to a nice date object
+  dplyr::mutate(TIMESTAMP = lubridate::ymd(TIMESTAMP)) |>
+
+  # set all -9999 to NA
+  dplyr::mutate(across(where(is.numeric), ~dplyr::na_if(., -9999))) |>  
+  
+  # retain only data based on >=80% good-quality measurements
+  # overwrite bad data with NA (not dropping rows)
+  dplyr::mutate(GPP_NT_VUT_REF = ifelse(NEE_VUT_REF_QC < 0.8, NA, GPP_NT_VUT_REF),
+                TA_F           = ifelse(TA_F_QC        < 0.8, NA, TA_F),
+                SW_IN_F        = ifelse(SW_IN_F_QC     < 0.8, NA, SW_IN_F),
+                LW_IN_F        = ifelse(LW_IN_F_QC     < 0.8, NA, LW_IN_F),
+                VPD_F          = ifelse(VPD_F_QC       < 0.8, NA, VPD_F),
+                PA_F           = ifelse(PA_F_QC        < 0.8, NA, PA_F),
+                P_F            = ifelse(P_F_QC         < 0.8, NA, P_F),
+                WS_F           = ifelse(WS_F_QC        < 0.8, NA, WS_F)) |> 
+
+  # drop QC variables (no longer needed)
+  dplyr::select(-ends_with("_QC"))
+# Removing LW_IN_F column, as most of the data is of bad quality so there are only NA values left
+dav <- dav_1[, -5]
+```
+
+As a second step I divided the data into a train and test dataset, pre-processed the data with the recipes functions and then did the model formulation with the training set.
+
+```{r warning = FALSE}
+
+# Data splitting
+set.seed(123)  # for reproducibility
+split_dav <- rsample::initial_split(dav, prop = 0.8, strata = "VPD_F")
+dav_train <- rsample::training(split_dav)
+dav_test <- rsample::testing(split_dav)
+
+# Pre-processing
+pp_dav <- recipes::recipe(GPP_NT_VUT_REF ~ SW_IN_F + VPD_F + TA_F, 
+                      data = dav_train) |> 
+  recipes::step_center(all_numeric(), -all_outcomes()) |>
+  recipes::step_scale(all_numeric(), -all_outcomes())
+
+# Model formulation
+set.seed(1982)
+mod_dav <- caret::train(pp_dav, 
+                       data = dav_train |> drop_na(), 
+                       method = "knn",
+                       trControl = caret::trainControl(method = "cv", number = 10),
+                       metric = "MAE")
+```
+
+## Preparing the Lägern dataset
+
+I did the same with the Lägern dataset as I did before with the Davos dataset.
+
+```{r warning = FALSE}
+
+lae_1 <- data_lae |>  
+  
+  # select only the variables we are interested in
+  dplyr::select(TIMESTAMP,
+                GPP_NT_VUT_REF,    # the target
+                ends_with("_QC"),  # quality control info
+                ends_with("_F"),   # includes all all meteorological covariates
+                -contains("JSB")   # weird useless variable
+                ) |>
+
+  # convert to a nice date object
+  dplyr::mutate(TIMESTAMP = lubridate::ymd(TIMESTAMP)) |>
+
+  # set all -9999 to NA
+  dplyr::mutate(across(where(is.numeric), ~dplyr::na_if(., -9999))) |>  
+  
+  # retain only data based on >=80% good-quality measurements
+  # overwrite bad data with NA (not dropping rows)
+  dplyr::mutate(GPP_NT_VUT_REF = ifelse(NEE_VUT_REF_QC < 0.8, NA, GPP_NT_VUT_REF),
+                TA_F           = ifelse(TA_F_QC        < 0.8, NA, TA_F),
+                SW_IN_F        = ifelse(SW_IN_F_QC     < 0.8, NA, SW_IN_F),
+                LW_IN_F        = ifelse(LW_IN_F_QC     < 0.8, NA, LW_IN_F),
+                VPD_F          = ifelse(VPD_F_QC       < 0.8, NA, VPD_F),
+                PA_F           = ifelse(PA_F_QC        < 0.8, NA, PA_F),
+                P_F            = ifelse(P_F_QC         < 0.8, NA, P_F),
+                WS_F           = ifelse(WS_F_QC        < 0.8, NA, WS_F)) |> 
+
+  # drop QC variables (no longer needed)
+  dplyr::select(-ends_with("_QC"))
+
+# removing P_F column, as all the data is of bad quality so there are only NA values left
+lae <-lae_1[, -8]
+```
+
+As before I made the data splitting and model formulation for the Lägern dataset.
+
+```{r warning = FALSE}
+
+# Data splitting
+set.seed(123)  # for reproducibility
+split_lae <- rsample::initial_split(lae, prop = 0.8, strata = "VPD_F")
+lae_train <- rsample::training(split_lae)
+lae_test <- rsample::testing(split_lae)
+
+#Pre-processing
+pp_lae <- recipes::recipe(GPP_NT_VUT_REF ~ SW_IN_F + VPD_F + TA_F, 
+                      data = lae_train) |> 
+  recipes::step_center(all_numeric(), -all_outcomes()) |>
+  recipes::step_scale(all_numeric(), -all_outcomes())
+
+#Model formulation
+set.seed(1982)
+mod_lae <- caret::train(pp_lae, 
+                       data = lae_train |> drop_na(), 
+                       method = "knn",
+                       trControl = caret::trainControl(method = "cv", number = 10),
+                       metric = "MAE")
+```
+
+# 2. Within-site and across-site preditions
+
+## Predicting the fitted values on the Davos test set with the two models
+
+```{r warning = FALSE}
+
+# Predicting values with the two models
+dav_test <- dav_test |> 
+    drop_na()
+dav_test$mod_dav <- predict(mod_dav, newdata = dav_test)
+
+dav_test <- dav_test |> 
+    drop_na()
+dav_test$mod_lae <- predict(mod_lae, newdata = dav_test)
+
+# Calculating the mean absolute error for both models
+mae_dav_mdav <- Metrics::mae(dav_test$GPP_NT_VUT_REF, dav_test$mod_dav)
+mae_dav_mlae <- Metrics::mae(dav_test$GPP_NT_VUT_REF, dav_test$mod_lae)
+
+#Calculating the R squared values for both models
+rsq_dav_mdav <- yardstick::rsq(dav_test, GPP_NT_VUT_REF, mod_dav)
+rsq_dav_mdav <- rsq_dav_mdav |> 
+    pull(.estimate)
+
+rsq_dav_mlae <- yardstick::rsq(dav_test, GPP_NT_VUT_REF, mod_lae)
+rsq_dav_mlae <- rsq_dav_mlae |> 
+    pull(.estimate)
+
+library(ggplot2)
+
+plot_1 <- ggplot(data = dav_test, aes(GPP_NT_VUT_REF, mod_dav)) +
+    geom_point(alpha = 0.3) +
+    geom_smooth(method = "lm", se = FALSE, color = "red") +
+    geom_abline(slope = 1, intercept = 0, linetype = "dotted") +
+    labs(subtitle = bquote( italic(R)^2 == .(format(rsq_dav_mdav, digits = 2)) ~~
+                              MAE == .(format(mae_dav_mdav, digits = 3))),
+         title = "Model Davos") +
+    theme_classic()
+
+plot_2 <- ggplot(data = dav_test, aes(GPP_NT_VUT_REF, mod_lae)) +
+    geom_point(alpha = 0.3) +
+    geom_smooth(method = "lm", se = FALSE, color = "red") +
+    geom_abline(slope = 1, intercept = 0, linetype = "dotted") +
+    labs(subtitle = bquote( italic(R)^2 == .(format(rsq_dav_mlae, digits = 2)) ~~
+                              MAE == .(format(mae_dav_mlae, digits = 3))),
+         title = "Model Lägern") +
+    theme_classic()
+
+cowplot::plot_grid(plot_1, plot_2)
+```
+
+## Predicting the fitted values on the Lägern test set with the two models
+
+```{r warning = FALSE}
+
+# Predicting values with the two models
+lae_test <- lae_test |> 
+    drop_na()
+lae_test$mod_dav <- predict(mod_dav, newdata = lae_test)
+
+lae_test <- lae_test |> 
+    drop_na()
+lae_test$mod_lae <- predict(mod_lae, newdata = lae_test)
+
+# Calculating the mean absolute error for both models
+mae_lae_mdav <- Metrics::mae(lae_test$GPP_NT_VUT_REF, lae_test$mod_dav)
+mae_lae_mlae <- Metrics::mae(lae_test$GPP_NT_VUT_REF, lae_test$mod_lae)
+
+#Calculating the R squared values for both models
+rsq_lae_mdav <- yardstick::rsq(lae_test, GPP_NT_VUT_REF, mod_dav)
+rsq_lae_mdav <- rsq_lae_mdav |> 
+    pull(.estimate)
+
+rsq_lae_mlae <- yardstick::rsq(lae_test, GPP_NT_VUT_REF, mod_lae)
+rsq_lae_mlae <- rsq_lae_mlae |> 
+    pull(.estimate)
+
+
+plot_3 <- ggplot(data = lae_test, aes(GPP_NT_VUT_REF, mod_dav)) +
+    geom_point(alpha = 0.3) +
+    geom_smooth(method = "lm", se = FALSE, color = "red") +
+    geom_abline(slope = 1, intercept = 0, linetype = "dotted") +
+    labs(subtitle = bquote( italic(R)^2 == .(format(rsq_lae_mdav, digits = 2)) ~~
+                              MAE == .(format(mae_lae_mdav, digits = 3))),
+         title = "Model Davos") +
+    theme_classic()
+
+plot_4 <- ggplot(data = lae_test, aes(GPP_NT_VUT_REF, mod_lae)) +
+    geom_point(alpha = 0.3) +
+    geom_smooth(method = "lm", se = FALSE, color = "red") +
+    geom_abline(slope = 1, intercept = 0, linetype = "dotted") +
+    labs(subtitle = bquote( italic(R)^2 == .(format(rsq_lae_mlae, digits = 2)) ~~
+                              MAE == .(format(mae_lae_mlae, digits = 3))),
+         title = "Model Lägern") +
+    theme_classic()
+
+cowplot::plot_grid(plot_3, plot_4)
+```
+
+## Interpretation of the within-site and across-site predictions
+
+I could see from my results that the within-site predictions worked better than the across-site predictions. This makes sense, since the test data used for the within-site predictions fits the model better than in the across-site prediction. However, I would say that the predictions of the model in the across-site predictions have not been bad either, since according to the R2 values (0.49 and 0.54 for the across-site predictions), it explains at least half of the fitted values.
+
+Something I discovered for the within- and across-site predictions is, that the Lägern model predicts higher values for GPP than the Davos model.
+
+# 3. Model with data from both sites
+
+## Model formulation and testing
+
+```{r warning = FALSE}
+
+# Making a new data frame with both sites in it
+both <- rbind(dav_1, lae_1)
+
+set.seed(123)  # for reproducibility
+split_both <- rsample::initial_split(both, prop = 0.8, strata = "VPD_F")
+both_train <- rsample::training(split_both)
+both_test <- rsample::testing(split_both)
+
+# Pre-processing
+pp_both <- recipes::recipe(GPP_NT_VUT_REF ~ SW_IN_F + VPD_F + TA_F, 
+                      data = both_train) |> 
+  recipes::step_center(all_numeric(), -all_outcomes()) |>
+  recipes::step_scale(all_numeric(), -all_outcomes())
+
+# Model formulation
+set.seed(1982)
+mod_both <- caret::train(pp_both, 
+                       data = both_train |> drop_na(), 
+                       method = "knn",
+                       trControl = caret::trainControl(method = "cv", number = 10),
+                       metric = "MAE")
+
+# Predicting values for all three test sets
+both_test <- both_test |> 
+    drop_na()
+both_test$mod_both <- predict(mod_both, newdata = both_test)
+
+dav_test$mod_both <- predict(mod_both, newdata = dav_test)
+
+lae_test$mod_both <- predict(mod_both, newdata = lae_test)
+
+# Calculating the mean absolute error for all three test sets
+mae_both_mdav <- Metrics::mae(dav_test$GPP_NT_VUT_REF, dav_test$mod_both)
+mae_both_mlae <- Metrics::mae(lae_test$GPP_NT_VUT_REF, lae_test$mod_both)
+mae_both_mboth <- Metrics::mae(both_test$GPP_NT_VUT_REF, both_test$mod_both)
+
+#Calculating the R squared values for all three test sets
+rsq_both_mdav <- yardstick::rsq(dav_test, GPP_NT_VUT_REF, mod_both)
+rsq_both_mdav <- rsq_both_mdav |> 
+    pull(.estimate)
+
+rsq_both_mlae <- yardstick::rsq(lae_test, GPP_NT_VUT_REF, mod_both)
+rsq_both_mlae <- rsq_both_mlae |> 
+    pull(.estimate)
+
+rsq_both_mboth <- yardstick::rsq(both_test, GPP_NT_VUT_REF, mod_both)
+rsq_both_mboth <- rsq_both_mboth |> 
+    pull(.estimate)
+
+plot_5 <- ggplot(data = dav_test, aes(GPP_NT_VUT_REF, mod_both)) +
+    geom_point(alpha = 0.3) +
+    geom_smooth(method = "lm", se = FALSE, color = "red") +
+    geom_abline(slope = 1, intercept = 0, linetype = "dotted") +
+    labs(subtitle = bquote( italic(R)^2 == .(format(rsq_both_mdav, digits = 2)) ~~
+                              MAE == .(format(mae_both_mdav, digits = 3))),
+         title = "Combined model on Davos test set") +
+    theme_classic()
+
+plot_6 <- ggplot(data = lae_test, aes(GPP_NT_VUT_REF, mod_both)) +
+    geom_point(alpha = 0.3) +
+    geom_smooth(method = "lm", se = FALSE, color = "red") +
+    geom_abline(slope = 1, intercept = 0, linetype = "dotted") +
+    labs(subtitle = bquote( italic(R)^2 == .(format(rsq_both_mlae, digits = 2)) ~~
+                              MAE == .(format(mae_both_mlae, digits = 3))),
+         title = "Combined model on Lägern test set") +
+    theme_classic()
+
+plot_7 <- ggplot(data = both_test, aes(GPP_NT_VUT_REF, mod_both)) +
+    geom_point(alpha = 0.3) +
+    geom_smooth(method = "lm", se = FALSE, color = "red") +
+    geom_abline(slope = 1, intercept = 0, linetype = "dotted") +
+    labs(subtitle = bquote( italic(R)^2 == .(format(rsq_both_mboth, digits = 2)) ~~
+                              MAE == .(format(mae_both_mboth, digits = 3))),
+         title = "Combined model on combined test set") +
+    theme_classic()
+
+cowplot::plot_grid(plot_5, plot_6, plot_7)
+```
+
+## How do the model metrics on the tests set compare to the true out-of-sample setup above?
+
+The predictions made with the combined model on the test sets are pretty good and the R2 values are higher than for the across-site predictions. That makes sense because the model training was made partly with data from the same dataset as the data in the test set.
+
+## Is it a valid approach to perform model training like this?
+
+I don't know if this is really done in machine learning but for me it would make sense to use data from multiple sites to train a model that should make good predictions for many different sites. Like this different conditions could be covered and this isn't possible when you only use data from one site.
+
+# 4. Characteristics of the two sites
+
+## What are the differences in terms of climate, vegetation, altitude, etc. between the Davos and Lägern sites?
+
+| Characteristic                   | Davos site                                                                                                                                                                                                 | Lägern site                                                                                                                                                                                                                                             |
+|------------------|-------------------------|-----------------------------|
+| Climate                          | Tundra                                                                                                                                                                                                     | Not specified                                                                                                                                                                                                                                           |
+| Vegetation                       | Evergreen Needleleaf Forests: Lands dominated by woody vegetation with a percent cover \>60% and height exceeding 2 meters. Almost all trees remain green all year. Canopy is never without green foliage. | Mixed Forests: Lands dominated by trees with a percent cover \>60% and height exceeding 2 meters. Consists of tree communities with interspersed mixtures or mosaics of the other four forest types. None of the forest types exceeds 60% of landscape. |
+| Elevation(m):                    | 1639                                                                                                                                                                                                       | 689                                                                                                                                                                                                                                                     |
+| Mean Annual Temperature (°C):    | 2.8                                                                                                                                                                                                        | 8.3                                                                                                                                                                                                                                                     |
+| Mean Annual Precipitation. (mm): | 1062                                                                                                                                                                                                       | 1100                                                                                                                                                                                                                                                    |
+
+As we can see in the table, that the Davos site is located much higher than the Lägern site. Therefore, the average temperature in Davos is lower, while the amount of rain is about the same for both. Also the vegetation differs, because in Davos the forests are purely coniferous, while in Lägern there are mixed forests, so not all trees are green all year round like in Davos.
+
+The reason for the biases in the out-of-sample predictions could be the different values of the predictors that occur through the different conditions of the two sites. As we have seen through the comparison of the two sites, the temperatures of the Lägern sites are a few degrees above the temperatures in Davos, so the model of the Davos site won't fit as good to the conditions of a site where it is a few degrees warmer.
+
+It could also be that the unlike vegetation of the two sites leads to different GPP values, because the photosynthesis rates of needle leaf trees and deciduous trees differ and this could have an impact on model performance. Also the temperature and the duration of the growing season of the plants have an impact on how much photosynthesis can be done and both of these parameters are bigger at the Lägern site.
+
+So I suspect that these points I mentioned above could explain why the Lägern model predicts higher GPP values than the Davos model.

@@ -1,0 +1,244 @@
+---
+title: "report.RMD"
+author: "Janina Hämmerli"
+date: "2023-02-24"
+output: html_document
+---
+
+# Report Exercise Chapter 3
+
+## 1. Cleaned Database S1
+
+```{r warning=FALSE}
+library(readr)
+
+database <- read.csv("~/Studium Jahr 2/ADGS/my_project/agds_report_janinahaemmerli/Data/Database_S1.CSV", sep = ";")
+
+#Deleting empty rows from the database
+database_S1 <- database[,1:8]
+
+```
+
+## 2. Log-response ration per experiment
+
+To calculate the log-response ratio for each experiment, I first used the mutate() function to create a row with the calculated ratio for each of the observations. Then, I used group_by() and summarise() to aggregate the ratios per experiment by taking their mean.
+
+```{r warning=FALSE}
+library(tidyverse)
+library(knitr)
+
+RR_experiments <- database_S1 |>
+  mutate(RR = log((database_S1[,6]/database_S1[,5]))) |>
+  group_by(Experiment) |>
+  summarise(RR = mean(RR))
+
+kable(RR_experiments)
+```
+
+## 3. Log-response ratio per phase
+
+First, I made a separate database with an additional row, that contains the corresponding phase for each observation. With this database I calculated then the log-response ratio like I did it in step 2, but this time I grouped the observations per phase.
+
+```{r warning=FALSE}
+database_S1_phases <- database_S1 |>
+  filter(Time..years.<3) |>
+  mutate(phase= "early_phase") |>
+  bind_rows(
+    database_S1 |>
+      filter((Time..years.>=3) & (Time..years.<=6)) |>
+      mutate(phase = "middle_phase")) |>
+  bind_rows(
+    database_S1 |>
+      filter(Time..years.>6) |>
+      mutate(phase = "late_phase"))
+
+RR_time <- database_S1_phases |>
+  mutate(RR = log((database_S1_phases[,6]/database_S1_phases[,5]))) |>
+  group_by(phase) |>
+  summarise(RR= mean(RR))
+
+kable(RR_time)
+```
+
+# Report Exercise Chapter 4
+
+## 1. Detecting correlations between the variables
+
+As a first step I wanted to look if there are any relationships between the different variables of the dataset. To spot any relationships, I used scatter plots, to which I also added a regression line to indicate possible correlations. I made a scatter plot for every possible combination between the variables Ozone, Solar.R, Wind and Temperature, which resulted in six different plots.
+
+```{r warning=FALSE}
+airquality <- datasets::airquality
+
+library(ggplot2)
+
+plot_solarR <- ggplot(
+  data = airquality,
+  aes(x = Solar.R, y = Temp)) +
+  geom_point(size = 0.75) +
+  geom_smooth(method = "lm", color = "red") +
+  labs(title = "Solar Radiation + Temperature",
+       x = "Solar Radiation (lang)", 
+       y = "Temperature (°F)") +
+  theme_classic()
+
+plot_ozon <- ggplot(
+  data = airquality,
+  aes(x = Ozone, y = Temp)) +
+  geom_point(size = 0.75) +
+  geom_smooth(method = "lm", color = "red") +
+  labs(title = "Ozone + Temperature",
+       x = "Ozone (ppb)", 
+       y = "Temperature (°F)") +
+  theme_classic()
+
+plot_wind <- ggplot(
+  data = airquality,
+  aes(x = Wind, y = Temp)) +
+  geom_point(size = 0.75) +
+  geom_smooth(method = "lm", color = "red") +
+  labs(title = "Wind + Temperature",
+     x = "Wind (mph)", 
+     y = "Temperature (°F)") +
+  theme_classic()
+
+plot_RW <- ggplot(
+  data = airquality,
+  aes(x = Wind, y = Solar.R)) +
+  geom_point(size = 0.75) +
+  geom_smooth(method = "lm", color = "red") +
+  labs(title = "Wind + Solar Radiation",
+     x = "Wind (mph)", 
+     y = "Solar Radiation (lang)") +
+  theme_classic()
+
+plot_RO <- ggplot(
+  data = airquality,
+  aes(x = Ozone, y = Solar.R)) +
+  geom_point(size = 0.75) +
+  geom_smooth(method = "lm", color = "red") +
+  labs(title = "Ozone + Solar Radiation",
+     x = "Ozone (ppb)", 
+     y = "Solar Radiation (lang)") +
+  theme_classic()
+
+plot_WO <- ggplot(
+  data = airquality,
+  aes(x = Ozone, y = Wind)) +
+  geom_point(size = 0.75) +
+  geom_smooth(method = "lm", color = "red") +
+  labs(title = "Ozone + Wind",
+     x = "Ozone (ppb)", 
+     y = "Wind (mph)") +
+  theme_classic()
+
+# Combine the different plots into one single plot
+
+cowplot::plot_grid(plot_ozon, plot_solarR, plot_wind, plot_RO, plot_RW, plot_WO, labels = "auto")
+```
+
+As a result I saw that the strongest correlations exist between the ozone and the temperatures, the wind and the temperatures and the ozone and the wind. For the ozone and solar radiation there is also a relationship, but the variance (grey) is quite big and for solar radiation + temperature and wind + solar radiation, the correlation is only minimal.
+
+As a next step, I want further to look at the correlation between the ozone and the temperatures, because they seem to be related the most.
+
+## 2. Relation between ozone and temperature linkt to monthly patterns
+
+To investigate this relationship further, I wanted to include the temporal scale and see if the regression between the ozone and the temperatures changes between months. To do so I included a linear regression for every month from May (5) to September (9).
+
+```{r warning= FALSE}
+library(ggplot2)
+
+ggplot(
+  data = airquality,
+  aes(x = Ozone, y = Temp, color = as.factor(Month))) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(title = "Relationship Ozone & Temperature in different months",
+       x = "Ozone (ppb)",
+       y = "Temperature (°F)") +
+  scale_y_continuous(limits = c(50, 110)) +
+  theme_classic() +
+  scico::scale_color_scico_d()
+```
+
+In the resulting plot, we can already see that the linear regressions have different slopes, so there actually is a difference in the regression between the different months. But like this it was hard for me to make any other observations, so I separated the plot into sub-plots for each month.
+
+```{r warning=FALSE}
+library(ggplot2)
+
+ggplot(
+  data = airquality,
+  aes(x = Ozone, y = Temp)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm", color = "red", se = FALSE) +
+  labs(title = "Relationship Ozone & Temperature in different months",
+       x = "Ozone (ppb)",
+       y = "Temperature (°F)") +
+  facet_wrap(~Month)
+```
+
+Like this it is easier to see how the different points are distributed in every month. An observation I made is that in July and August, the ozone range is the broadest and more shallow than in the other months and the ozone values are altogether the highest, what makes sense because these two months are usually the hottest of the year. To take a better look at the ozone levels per month I made a boxplot, that confirmed my observations from above. The median of the ozone values is the highest in July and August and also the ranges (the lines extending) are a lot wider than in the other three months.
+
+```{r}
+boxplot1 <- ggplot(
+  data = airquality,
+  aes(x = as.factor(Month), y = Ozone)) +
+  geom_boxplot(fill = "grey70") +
+  labs(title = "Boxplot") +
+  labs(x = "Month", y = "Ozone") +
+  theme_classic()
+boxplot1
+```
+
+Something else that I discovered is, that there are only few datapoints in the month of June and I made some hypotheses why this could be the case, that I wanted to test further.Also the boxplot of June is the smallest, this is probably due to the numerous missing values.
+
+## Why are there only few datapoints in June?
+
+I wanted to test if one of the other variables could be the reason why some ozone values are missing. My hypothesis is, that with strong winds, the ozone gets transported away and there is only a small concentration left that can't be measured anymore and results in NA. I also tested if the solar radiation or the temperature could be the reason for missing values. To do so, I made scatterplotts with where I plotted the variable with the date. To find out if the missing ozone variables have something to do with the variable, I colored the values where the ozone is missing in the plot in orange. With this I wanted to see if the missing values follow a certain distribution (e.g. when NA is missing the wind speed is very high). But the plots show, that there is no such distribution that explains the missing ozone values, because the orange dots are arranged in a wide range in all three plots without showing any correlation. So unfortunately like this, it wasn't possible to confirm my hypothesis or detect any other reason for the missing ozone values.
+
+```{r warning=FALSE}
+library(tidyverse)
+
+#adding a new row with the dates to the dataset
+airquality$dates <- paste(airquality$Day, airquality$Month, sep = "-")
+airquality <- airquality |>
+  dplyr::mutate(dates = as.Date(dates, "%d-%m")) # The dates contain the year 2023 instead of the year 1973,when they were actually measured, but for the following steps this doesn't matter
+
+#Adding a new row named values with the information if there is a measurement for ozone (Yes), or if it is NA (No)
+airquality <- airquality |>
+  filter(is.na(Ozone)) |>
+  mutate(value= "No") |>
+  bind_rows(
+    airquality |>
+      filter(Ozone != is.na(Ozone)) |>
+      mutate(value= "Yes"))
+
+plot_1 <- ggplot(
+  data = airquality,
+  aes(x = dates, y = Wind, color = as.factor(value)))+
+  geom_point() +
+  labs(title = "Wind as reason for NA?",
+       x= "Date",
+       y = "Wind (mph)") +
+  theme_classic()
+
+plot_2 <- ggplot(
+  data = airquality,
+  aes(x = dates, y = Solar.R, color = as.factor(value)))+
+  geom_point() +
+  labs(title =  "Solar radiation as reason for NA?", 
+       x= "Date",
+       y = "Solar Radiation (lang)") +
+  theme_classic()
+
+plot_3 <- ggplot(
+  data = airquality,
+  aes(x = dates, y = Temp, color = as.factor(value)))+
+  geom_point() +
+  labs(title = "Temperature as reason for NA?",
+       x= "Date",
+       y = "Temperature (°F)") +
+  theme_classic()
+
+cowplot::plot_grid(plot_1, plot_2, plot_3, labels =  "auto")
+
+```

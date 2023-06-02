@@ -1,0 +1,104 @@
+---
+title: "Report exercise 8: Stepwise regression"
+author: "Janina Hämmerli"
+date: "2023-04-23"
+output: html_document
+---
+
+## Loading the data
+
+First, i loaded the half-hourly fluxes dataset into my file.
+
+```{r warning = FALSE}
+half_hourly_fluxes <- readr::read_csv("~/Studium Jahr 2/ADGS/my_project/agds_report_janinahaemmerli/Data/df_for_stepwise_regression.csv")
+```
+
+## Exploring the data
+
+To get an overview of the data, I used the summary function, which helped me to take a look at the structure of the data and the different variables. Something I observed is, that some variables have a lot of NA values, especially the variable LW_IN_F\_MDS, where almost half of the observations are a NA value. I asked myself how the NA values would influence the outcome of the stepwise forward regression and if the predictors with many or few/none NA values would fit better into the model.
+
+```{r warning = FALSE}
+summary(half_hourly_fluxes)
+```
+
+As a next step I decided which variables I wanted to incorporate into the regression. I couldn't find out what the USTAR variable was about, so I decided to leave it out. Then I made a dataset with only the predictors I was going to use in the regression and the GPP. This dataset I'm using later on in my stepwise forward regression
+
+```{r}
+half_hourly_fluxes_sub <- half_hourly_fluxes[,3:16]
+```
+
+## Step 1-3 stepwise forward regression:
+
+To begin with I made a simple for loop that creates a table with the R square values, to which I added the name of the predictor in an additional column. Then I selected the highest R square value, which belonged to the predictor PPFD_IN, and computed its AIC. Here I could see that a predictor with many NA values reached the highest R squared and I asked myself if this had something to do with the fact that this variable has less observation that influenced the model.
+
+```{r warning = FALSE}
+df_rsq <- data.frame(r_squared = numeric()) #creating an empty data frame 
+
+for (i in half_hourly_fluxes[3:15]){
+  mod <- lm(GPP_NT_VUT_REF ~ i, data = half_hourly_fluxes)
+  r_squared <- summary(mod)$r.squared
+  df_rsq[nrow(df_rsq) + 1,] <- r_squared #adding the R2 values to the data frame
+}
+names <- data.frame(predictors = colnames(half_hourly_fluxes)[3:15]) #creating a data frame with the predictor names
+df_rsq <- cbind(names, df_rsq) #joining the R2 values and the corresponding predictor names
+max(df_rsq[,2])
+
+best_mod <- lm(GPP_NT_VUT_REF ~ PPFD_IN, data = half_hourly_fluxes)
+extractAIC(best_mod)[2]
+```
+
+To take a look at the model, I made a scatterplot where I can see how the variables co-vary. From the plot I observed that there is a positive linear relationship between the variables, but as the dots aren't arranged in an even line, the relationship could be better, so this model doesn't fit the data perfectly.
+
+```{r warning = FALSE}
+library(ggplot2)
+
+ggplot(data = half_hourly_fluxes) +
+  geom_point(aes(
+    x = GPP_NT_VUT_REF,
+    y = PPFD_IN)) +
+  labs(x = "GPP_NT_VUT_REF",
+       y= "PPFD") +
+  geom_smooth(aes(
+    x=GPP_NT_VUT_REF,
+    y=PPFD_IN),
+    method = "lm") +
+  theme_classic()
+```
+
+## Stepwise forward regression
+
+Before I started with writing my own loop of a stepwise forward regression, I wrote down some ideas down what the implementation should contain. My ideas where:
+
+1.  Creating a for loop that gives me a table with all the R squared values.
+2.  Find out the highest R squared value from the table and save the index to find the corresponding predictor in the data frame with all the variables used.
+3.  Calculate the AIC of the new best model and compare it with the AIC of the best old model. If the AIC of the new model is bigger than the AIC of the old model, the loop has to stop (implement a if or while loop).
+4.  If the loop goes on, the newly added predictor has to be removed from the remaining variables that aren't in the model yet and added to the already selected variables.
+5.  A new run of the loop can start
+
+The loop that I came up with doesn't work properly. I unfortunately couldn't let it run entirely because of multiple errors that I wasn't able to solve. But when I did run the different steps of the code separately, it seemed to work, so the problem could be something that occurs when running it all at once.
+
+```{r warning = FALSE, error=TRUE}
+# defining some variables used in the loop
+best_p2 <- NULL
+var_remaining <- half_hourly_fluxes_sub[,-14] #df with all the predictors 
+var_selected <- data.frame(GPP = half_hourly_fluxes$GPP_NT_VUT_REF)
+df_rsq2 <- data.frame(r_squared = numeric()) #df where the R squared gets stored
+AIC_old <- 60000 # random number to start that is higher than AIC_new
+AIC_new <- 50000
+
+while (AIC_old > AIC_new){
+   for (i in var_remaining){
+      mod2 <- lm(GPP ~ . + i, data = var_selected) # I'm not quite sure if the lm(GPP ~ . + i, data = var_selected) statement   really works, because I don't know if the different predictors get separated with a "+" like this 
+      r_squared2 <- summary(mod3)$r.squared
+      df_rsq2[nrow(df_rsq2) + 1,] <- r_squared2
+    }
+  best_p2 <- which.max(unlist(df_rsq2)) #saving index of best fitting predictor 
+  var_selected[,ncol(var_selected) + 1] <- var_remaining[,best_p2]
+  
+  AIC_old <- AIC_new
+  AIC_new <- extractAIC(lm(GPP ~ . + unlist(var_remaining[,best_p2]), data = var_selected))[2]
+  
+  var_remaining <- var_remaining[-which(names(var_remaining)==names(var_selected))] #deleting selected predictor from df
+}
+var_selected
+```
