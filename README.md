@@ -1,2 +1,2 @@
 # agds_report_janinahaemmerli
-Report for Applied Geodata Science from Janina Hämmerli
+Repository for Applied Geodata Science from Janina Hämmerli
